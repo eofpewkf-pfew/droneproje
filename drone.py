@@ -2,6 +2,8 @@ import tensorflow as tf
 import cv2
 import numpy as np
 from codrone_edu.drone import *
+import time
+import math
 
 # Initialize the drone
 drone = Drone()
@@ -18,6 +20,42 @@ print("In the air!")
 
 # Initialize the webcam
 cap = cv2.VideoCapture(0)
+
+# Movement Speed (Adjust based on your preferences)
+MOVEMENT_SPEED = 20
+ROTATION_SPEED = 10
+CIRCLE_RADIUS = 50  # Define the radius of the circular motion
+
+def circle_around_room():
+    """ Make the drone move in a circular path """
+    while True:
+        drone.forward(MOVEMENT_SPEED)  # Move forward
+        drone.turn_right(ROTATION_SPEED)  # Rotate right slightly
+        time.sleep(0.1)  # Adjust this to control the speed of the circle
+        # This loop will make the drone move in a circle as it keeps moving forward and turning right
+
+def move_towards_object(center_x, center_y, frame_center_x, frame_center_y, w, h):
+    """ Move drone towards the detected object based on its position """
+    if center_x < frame_center_x - 50:  # Object is left of the frame center
+        drone.turn_left(ROTATION_SPEED)
+    elif center_x > frame_center_x + 50:  # Object is right of the frame center
+        drone.turn_right(ROTATION_SPEED)
+
+    if center_y < frame_center_y - 50:  # Object is above the center
+        drone.ascend(MOVEMENT_SPEED)  # Using ascend to move up
+    elif center_y > frame_center_y + 50:  # Object is below the center
+        drone.descend(MOVEMENT_SPEED)  # Using descend to move down
+
+def zigzag_movement():
+    """ Make the drone fly in a zigzag pattern when no object is detected """
+    drone.forward(MOVEMENT_SPEED)
+    time.sleep(1)
+    drone.turn_right(ROTATION_SPEED)
+    time.sleep(0.5)
+    drone.forward(MOVEMENT_SPEED)
+    time.sleep(1)
+    drone.turn_left(ROTATION_SPEED)
+    time.sleep(0.5)
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -37,6 +75,8 @@ while cap.isOpened():
     class_ids = detections['detection_classes'][0].numpy().astype(int)
     scores = detections['detection_scores'][0].numpy()
 
+    object_detected = False  # Flag to check if any object is detected
+
     # Loop over all detected objects
     for i in range(len(boxes)):
         if scores[i] > 0.5:  # Confidence threshold (adjustable)
@@ -50,7 +90,7 @@ while cap.isOpened():
             # Draw rectangle around the detected object
             cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
 
-            # Optional: Draw label with score (or any other information)
+            # Optional: Draw label with score
             label = f"Score: {scores[i]:.2f}"
             cv2.putText(frame, label, (startX, startY - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
@@ -62,25 +102,20 @@ while cap.isOpened():
                 center_x = (startX + endX) // 2
                 center_y = (startY + endY) // 2
 
-                # Move the drone based on the object's position in the frame
+                # Frame center
                 frame_center_x = w // 2
                 frame_center_y = h // 2
 
-                # Simple logic to move the drone based on the object's location in the frame
-                if center_x < frame_center_x - 50:  # Object is left of the frame center
-                    drone.turn_left(10)  # Turn drone to the left
-                elif center_x > frame_center_x + 50:  # Object is right of the frame center
-                    drone.turn_right(10)  # Turn drone to the right
+                # Move the drone towards the object
+                move_towards_object(center_x, center_y, frame_center_x, frame_center_y, w, h)
 
-                if center_y < frame_center_y - 50:  # Object is above the center
-                    drone.up(10)  # Move drone up
-                elif center_y > frame_center_y + 50:  # Object is below the center
-                    drone.down(10)  # Move drone down
+                object_detected = True
+                break  # Exit loop after first detection (you can modify for multiple objects)
 
-                # If object is detected very close, tell drone to hover (or avoid the object)
-                if scores[i] > 0.8:  # High confidence that it's a person/object
-                    drone.hover()  # Hover in place
-                    print("Hovering to avoid collision!")
+    if not object_detected:
+        # If no object is detected, make the drone perform a zigzag movement
+        print("No object detected. Performing zigzag movement.")
+        zigzag_movement()
 
     # Display the frame with detected objects
     cv2.imshow('Object Detection and Drone Control', frame)
@@ -88,6 +123,10 @@ while cap.isOpened():
     # Exit the loop when 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+# Start the circular movement
+print("Starting circular movement.")
+circle_around_room()
 
 # Land the drone once the loop ends
 drone.land()
