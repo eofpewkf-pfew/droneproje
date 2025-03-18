@@ -1,9 +1,16 @@
+import os
+import logging
 import tensorflow as tf
 import cv2
 import numpy as np
 from codrone_edu.drone import *
 import time
-import math
+import random
+import threading
+
+# Suppress TensorFlow and absl logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logging
+logging.getLogger('absl').setLevel(logging.ERROR)  # Suppress absl logging
 
 # Initialize the drone
 drone = Drone()
@@ -11,7 +18,7 @@ drone.pair()
 print("Paired!")
 
 # Load the pre-trained object detection model
-model_path = "/path/to/your/saved_model"
+model_path = "/Users/s1754510/Downloads/centernet_hg104_512x512_coco17_tpu-8/SavedModel"
 model = tf.saved_model.load(model_path)
 
 # Start the drone
@@ -22,40 +29,99 @@ print("In the air!")
 cap = cv2.VideoCapture(0)
 
 # Movement Speed (Adjust based on your preferences)
-MOVEMENT_SPEED = 20
-ROTATION_SPEED = 10
-CIRCLE_RADIUS = 50  # Define the radius of the circular motion
+MOVEMENT_SPEED = 40  # Faster movement for larger rooms
+ROTATION_SPEED = 15
+CIRCLE_RADIUS = 100  # Increase the radius of the circular motion for a larger area
 
-def circle_around_room():
-    """ Make the drone move in a circular path """
-    while True:
-        drone.forward(MOVEMENT_SPEED)  # Move forward
-        drone.turn_right(ROTATION_SPEED)  # Rotate right slightly
-        time.sleep(0.1)  # Adjust this to control the speed of the circle
-        # This loop will make the drone move in a circle as it keeps moving forward and turning right
+# Variables to manage drone's motion
+object_detected = False
+
+def random_move():
+    """ Make the drone move randomly in different directions over a larger area """
+    move_choice = random.choice(['move_forward', 'move_backward', 'turn_left', 'turn_right', 'ascend', 'descend'])
+    if move_choice == 'move_forward':
+        drone.set_pitch(50)  # Move forward with a positive pitch
+        time.sleep(2)  # Increased time for larger movement
+        drone.set_pitch(0)  # Stop moving forward
+    elif move_choice == 'move_backward':
+        drone.set_pitch(-50)  # Move backward with a negative pitch
+        time.sleep(2)  # Increased time for larger movement
+        drone.set_pitch(0)  # Stop moving backward
+    elif move_choice == 'turn_left':
+        drone.set_yaw(100)  # Turn left
+        time.sleep(2)  # Increased time for a larger turning radius
+        drone.set_yaw(0)  # Stop turning
+    elif move_choice == 'turn_right':
+        drone.set_yaw(-100)  # Turn right
+        time.sleep(2)  # Increased time for a larger turning radius
+        drone.set_yaw(0)  # Stop turning
+    elif move_choice == 'ascend':
+        drone.set_throttle(75)  # Ascend with a higher throttle for a bigger room
+        time.sleep(2)  # Increased time for larger movement
+        drone.set_throttle(0)  # Stop ascending
+    elif move_choice == 'descend':
+        drone.set_throttle(-75)  # Descend with a higher throttle for a bigger room
+        time.sleep(2)  # Increased time for larger movement
+        drone.set_throttle(0)  # Stop descending
+
+def creative_move():
+    """ Perform creative flight moves like figure-eight or random spins across a larger area """
+    move_choice = random.choice(['spin', 'figure_eight', 'ascend', 'descend', 'wobble'])
+    if move_choice == 'spin':
+        drone.set_yaw(100)  # Spin to the left
+        time.sleep(2)  # Increased time for a full spin
+        drone.set_yaw(-100)  # Spin to the right
+        time.sleep(2)
+    elif move_choice == 'figure_eight':
+        drone.set_pitch(50)  # Move forward in larger strides
+        time.sleep(2)
+        drone.set_yaw(-75)  # Turn a bit to the right
+        time.sleep(1)
+        drone.set_pitch(50)  # Move forward again
+        time.sleep(2)
+        drone.set_yaw(75)  # Turn a bit to the left
+        time.sleep(1)
+    elif move_choice == 'ascend':
+        drone.set_throttle(75)  # Ascend with a higher throttle
+        time.sleep(2)
+        drone.set_throttle(0)  # Stop ascending
+    elif move_choice == 'descend':
+        drone.set_throttle(-75)  # Descend with a higher throttle
+        time.sleep(2)
+        drone.set_throttle(0)  # Stop descending
+    elif move_choice == 'wobble':
+        drone.set_yaw(50)  # Wobble left
+        time.sleep(1)
+        drone.set_yaw(-50)  # Wobble right
+        time.sleep(1)
 
 def move_towards_object(center_x, center_y, frame_center_x, frame_center_y, w, h):
     """ Move drone towards the detected object based on its position """
-    if center_x < frame_center_x - 50:  # Object is left of the frame center
-        drone.turn_left(ROTATION_SPEED)
-    elif center_x > frame_center_x + 50:  # Object is right of the frame center
-        drone.turn_right(ROTATION_SPEED)
+    if center_x < frame_center_x - 100:  # Object is far left of the frame center
+        drone.set_yaw(100)  # Turn left (yaw left)
+    elif center_x > frame_center_x + 100:  # Object is far right of the frame center
+        drone.set_yaw(-100)  # Turn right (yaw right)
 
-    if center_y < frame_center_y - 50:  # Object is above the center
-        drone.ascend(MOVEMENT_SPEED)  # Using ascend to move up
-    elif center_y > frame_center_y + 50:  # Object is below the center
-        drone.descend(MOVEMENT_SPEED)  # Using descend to move down
+    if center_y < frame_center_y - 100:  # Object is far above the center
+        drone.set_throttle(75)  # Ascend faster
+    elif center_y > frame_center_y + 100:  # Object is far below the center
+        drone.set_throttle(-75)  # Descend faster
 
-def zigzag_movement():
-    """ Make the drone fly in a zigzag pattern when no object is detected """
-    drone.forward(MOVEMENT_SPEED)
-    time.sleep(1)
-    drone.turn_right(ROTATION_SPEED)
-    time.sleep(0.5)
-    drone.forward(MOVEMENT_SPEED)
-    time.sleep(1)
-    drone.turn_left(ROTATION_SPEED)
-    time.sleep(0.5)
+def avoid_object_and_continue():
+    """ If an object is detected, adjust the path but continue moving around the room """
+    random_move()  # Randomly change direction to avoid obstacles
+
+def circular_movement():
+    """ Keep the drone moving in a larger circular pattern """
+    while True:
+        drone.set_pitch(50)  # Move forward
+        drone.set_yaw(-15)  # Turn right (yaw right)
+        time.sleep(0.2)  # Adjust this to control the speed of the circle
+
+# Start circular movement in a separate thread to keep it running in the background
+movement_thread = threading.Thread(target=circular_movement)
+movement_thread.daemon = True  # This ensures the thread will exit when the program terminates
+movement_thread.start()
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -110,12 +176,18 @@ while cap.isOpened():
                 move_towards_object(center_x, center_y, frame_center_x, frame_center_y, w, h)
 
                 object_detected = True
+                avoid_object_and_continue()  # Avoid the detected object and keep moving
                 break  # Exit loop after first detection (you can modify for multiple objects)
 
     if not object_detected:
-        # If no object is detected, make the drone perform a zigzag movement
-        print("No object detected. Performing zigzag movement.")
-        zigzag_movement()
+        # If no object is detected, make the drone perform random or creative movements
+        print("No object detected. Continuing movement.")
+        random_move()
+
+        # Occasionally perform creative flight
+        if random.random() < 0.1:  # 10% chance of doing a creative move
+            print("Performing creative move.")
+            creative_move()
 
     # Display the frame with detected objects
     cv2.imshow('Object Detection and Drone Control', frame)
@@ -123,10 +195,6 @@ while cap.isOpened():
     # Exit the loop when 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
-
-# Start the circular movement
-print("Starting circular movement.")
-circle_around_room()
 
 # Land the drone once the loop ends
 drone.land()
